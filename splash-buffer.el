@@ -43,6 +43,27 @@
   :group 'splash-buffer
   :version 0.1)
 
+(defcustom splash-buffer-show-recover-session t
+  "Whether to display a message about auto-save files, when present."
+  :group 'splash-buffer
+  :version 0.1
+  :type 'boolean)
+
+(defcustom splash-buffer-recover-session-text
+  ;; FIXME: This is currently hand-wrapped. It could be done
+  ;; automatically in the future with the `s' library.
+  `(:face (default font-lock-comment-face)
+	  "Auto-save file(s) found. If an Emacs session crashed "
+	  "recently,\ntype "
+	  :link ("M-x recover-session RET"
+		 (lambda (_) (call-interactively 'recover-session)))
+	  " to recover the files you were\nediting.")
+  "The message shown in the splash buffer when auto-save files are found, as
+long as `splash-buffer-show-recover-session' is non-nil. By default, it is
+similar to the message that appears in the built-in *GNU Emacs* buffer."
+  :group 'splash-buffer
+  :version 0.1)
+
 (defun splash-buffer-show ()
   "Creates or updates the splash buffer, then switches to it.
 
