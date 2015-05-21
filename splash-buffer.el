@@ -64,33 +64,79 @@ similar to the message that appears in the built-in *GNU Emacs* buffer."
   :group 'splash-buffer
   :version 0.1)
 
-(defun splash-buffer-show ()
-  "Creates or updates the splash buffer, then switches to it.
+(defun splash-buffer (&rest plist)
+  "Create or update a splash buffer, then switch to it.
 
-This is a modifed version of the built-in `fancy-startup-screen'
+Arguments to this function must be in the form of a property
+list. The following keywords have special meaning --- all others
+are passed on to `setq' inside of the resulting buffer.
+
+    :name :content :show-recovery :recovery-content
+    :before :after :extra :keymap
+
+The details of their usage is below.
+
+    \:name
+
+    A string indicating the name for the splash buffer. If
+    absent, the value of `splash-buffer-buffer-name' will be used
+    instead.
+
+    \:content
+
+    A list of content that can be parsed by the
+    `fancy-splash-insert' function from the `startup.el' file.
+
+    \:show-recovery &
+    \:recover-content
+
+    When \:show-recover is non-nil, show the recovery content set
+    in `splash-buffer-recover-session-text'. Specifying
+    \:recover-content explicitly will override this content with
+    the argument.
+
+Internally, this function is based on the `fancy-startup-screen'
 function from `startup.el'."
-  (let ((buff (get-buffer-create splash-buffer-buffer-name)))
+  (let ((buff    (get-buffer-create
+		  (or (plist-get plist :name)
+		      splash-buffer-buffer-name)))
+	(content (or (plist-get plist :content)
+		     splash-buffer-contents))
+	(before  (plist-get plist :before))
+	(after   (plist-get plist :after))
+	(keymap  (plist-get plist :keymap))
+	(extra   (plist-get plist :extra))
+	;; Get the custom recovery content, if available.
+	;; Otherwise, check for suppression here and in the
+	;; package customizeable variables before using the
+	;; customizeable text as the content.
+	(recovery-content
+	 (or (plist-get plist :recovery-content)
+	     (and (not (plist-get plist :show-recovery))
+		  splash-buffer-show-recover-session
+		  splash-buffer-recover-session-text))))
+    ;; FIXME: Extract the remaining arguments and pass them on to
+    ;; `setq' after the call to `extra' below.
+    ;; FIXME: Should argument types be validated beforehand to
+    ;; prevent partial filling of the buffer?
     (with-current-buffer buff
       ;; Update the contents of the splash buffer.
       (let ((inhibit-read-only t))
 	(erase-buffer)
-	(fancy-splash-head)
-	(dolist (text splash-buffer-contents)
+	(when before (funcall before))
+	(dolist (text content)
 	  (apply #'fancy-splash-insert text)
 	  (insert "\n"))
 	(skip-chars-backward "\n")
 	(delete-region (point) (point-max))
 	(insert "\n")
-	(fancy-startup-tail))
+	(when after (funcall after))
+	;; FIXME: Show the recover-session message, if relevant.
+	)
       ;; Apply local settings.
-      (use-local-map splash-screen-keymap)
-      (setq-local browse-url-browser-function 'eww-browse-url)
-      (setq tab-width 22
-	    buffer-read-only t)
       (set-buffer-modified-p nil)
-      ;; Position the cursor.
-      (goto-char (point-min))
-      (forward-line 4))
+      (when keymap (use-local-map keymap))
+      (when extra (funcall extra)))
     ;; Finally, switch to the buffer.
     (switch-to-buffer buff)))
 
