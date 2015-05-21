@@ -95,6 +95,20 @@ The details of their usage is below.
     \:recover-content explicitly will override this content with
     the argument.
 
+    \:before, \:after &
+    \:extra
+
+    To achieve arbitrary buffer content, pass a function with one
+    of these keys. The \:before & \:after functions are run
+    before and after the \:content is inserted into the buffer.
+    \:extra is intended to change settings for the buffer, such
+    as the `tab-width' or the location of the cursor, and is run
+    last.
+
+    \:keymap
+
+    Specify a local key mapping for the splash buffer.
+
 Internally, this function is based on the `fancy-startup-screen'
 function from `startup.el'."
   (let ((buff    (get-buffer-create
@@ -112,7 +126,7 @@ function from `startup.el'."
 	;; customizeable text as the content.
 	(recovery-content
 	 (or (plist-get plist :recovery-content)
-	     (and (not (plist-get plist :show-recovery))
+	     (and (plist-get plist :show-recovery)
 		  splash-buffer-show-recover-session
 		  splash-buffer-recover-session-text))))
     ;; FIXME: Extract the remaining arguments and pass them on to
@@ -124,15 +138,23 @@ function from `startup.el'."
       (let ((inhibit-read-only t))
 	(erase-buffer)
 	(when before (funcall before))
+	;; Add the recover-session message to the content, so
+	;; long as this option is enabled and auto-save files are
+	;; found.
+	(when (and recovery-content
+		   ;; Check for auto-save files.
+		   (file-directory-p
+		    (file-name-directory
+		     auto-save-list-file-prefix)))
+	  (add-to-list 'content recovery-content t))
+	;; Format the content and insert it into the buffer.
 	(dolist (text content)
 	  (apply #'fancy-splash-insert text)
 	  (insert "\n"))
 	(skip-chars-backward "\n")
 	(delete-region (point) (point-max))
 	(insert "\n")
-	(when after (funcall after))
-	;; FIXME: Show the recover-session message, if relevant.
-	)
+	(when after (funcall after)))
       ;; Apply local settings.
       (set-buffer-modified-p nil)
       (when keymap (use-local-map keymap))
