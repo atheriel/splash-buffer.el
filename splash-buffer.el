@@ -32,135 +32,87 @@
   "Maintain a custom splash/start-up buffer."
   :group 'convenience)
 
-(defcustom splash-buffer-buffer-name "*GNU Emacs*"
-  "The name of the buffer used by splash-buffer."
-  :group 'splash-buffer
-  :version 0.1
-  :type 'string)
+(defvar splash-buffer-default-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map widget-keymap)
+    ;; TODO: Add a refresh toggle.
+    (define-key map "q" 'quit-window)
+    map)
+  "A keymap for `splash-buffer-default-mode'.")
 
-(defcustom splash-buffer-contents fancy-startup-text
-  "The contents of the splash buffer."
-  :group 'splash-buffer
-  :version 0.1)
+(define-derived-mode splash-buffer-default-mode fundamental-mode "SplashBuffer"
+  "The default major mode for \"splash\" buffers."
+  (setq truncate-lines t
+        buffer-read-only t))
 
-(defcustom splash-buffer-show-recover-session t
-  "Whether to display a message about auto-save files, when present."
-  :group 'splash-buffer
-  :version 0.1
-  :type 'boolean)
+(defun splash-buffer-insert-image (filepath)
+  "Insert the image at FILEPATH, if possible."
+  (if (file-exists-p filepath)
+      (progn
+	(let ((img (create-image filepath)))
+	  (insert-image img)))
+    (warn "Could not locate image file %s. Skipping..." filepath)))
 
-(defcustom splash-buffer-recover-session-text
-  ;; FIXME: This is currently hand-wrapped. It could be done
-  ;; automatically in the future with the `s' library.
-  `(:face (default font-lock-comment-face)
-	  "Auto-save file(s) found. If an Emacs session crashed "
-	  "recently,\ntype "
-	  :link ("M-x recover-session RET"
-		 (lambda (_) (call-interactively 'recover-session)))
-	  " to recover the files you were\nediting.")
-  "The message shown in the splash buffer when auto-save files are found, as
-long as `splash-buffer-show-recover-session' is non-nil. By default, it is
-similar to the message that appears in the built-in *GNU Emacs* buffer."
-  :group 'splash-buffer
-  :version 0.1)
+(defmacro splash-buffer-define (symbol buffer-name &rest body)
+  "Create a \"splash\" buffer function SYMBOL.
 
-(defun splash-buffer (&rest plist)
-  "Create or update a splash buffer, then switch to it.
+The buffer will be denoted by BUFFER-NAME (e.g. \"*GNU Emacs*\").
+BODY should contain forms that insert content into such a buffer,
+although it may also begin with any nunmber of these keyword
+arguments:
 
-Arguments to this function must be in the form of a property
-list. The following keywords have special meaning --- all others
-are passed on to `setq' inside of the resulting buffer.
+:mode MODE
 
-    :name :content :show-recovery :recovery-content
-    :before :after :extra :keymap
+    Use major mode MODE in the buffer, instead of the default
+    `splash-buffer-default-mode'.
 
-The details of their usage is below.
+:keymap MAP
 
-    \:name
+    Use MAP as a local keymap in the buffer.
+"
+  (declare (indent defun))
+  ;; Basic argument checking.
+  (when (not (symbolp symbol))
+    (error "splash-buffer requires a symbol to denote the buffer."))
+  (when (not (stringp buffer-name))
+    (error "buffer-name must be a string."))
+  ;; FIXME: Support extracting keyword arguments.
+  (let ((mode 'splash-buffer-default-mode) ;; FIXME
+	(map nil)
+	(after nil)
+	(create-func (intern (format "%s--create" symbol)))
+	(buffer-name-symbol (intern (format "%s--name" symbol))))
+    ;; Extract keyword arguments from BODY.
+    (while (keywordp (car body))
+      (pcase (pop body)
+	(`:mode (setq mode (pop body)))
+	(`:keymap (setq map (pop body)))
+	(`:after (setq after (pop body)))
+	(_ (pop body))))
+    ;; Create function definitions.
+    `(progn
+       (defconst ,buffer-name-symbol ,buffer-name
+	 ,(format "The name of the %s buffer itself." symbol))
 
-    A string indicating the name for the splash buffer. If
-    absent, the value of `splash-buffer-buffer-name' will be used
-    instead.
+       (defun ,create-func ()
+	 ,(format "Inserts the contents of `%s'." symbol)
+	 (with-current-buffer (get-buffer-create ,buffer-name-symbol)
+	   (save-excursion
+	     (goto-char (point-min))
+	     ,@body
+	     (,mode)
+	     ,(when map `(use-local-map ,map))
+	     ,(when after `,after)
+	     )))
 
-    \:content
-
-    A list of content that can be parsed by the
-    `fancy-splash-insert' function from the `startup.el' file.
-
-    \:show-recovery &
-    \:recover-content
-
-    When \:show-recover is non-nil, show the recovery content set
-    in `splash-buffer-recover-session-text'. Specifying
-    \:recover-content explicitly will override this content with
-    the argument.
-
-    \:before, \:after &
-    \:extra
-
-    To achieve arbitrary buffer content, pass a function with one
-    of these keys. The \:before & \:after functions are run
-    before and after the \:content is inserted into the buffer.
-    \:extra is intended to change settings for the buffer, such
-    as the `tab-width' or the location of the cursor, and is run
-    last.
-
-    \:keymap
-
-    Specify a local key mapping for the splash buffer.
-
-Internally, this function is based on the `fancy-startup-screen'
-function from `startup.el'."
-  (let ((buff    (get-buffer-create
-		  (or (plist-get plist :name)
-		      splash-buffer-buffer-name)))
-	(content (or (plist-get plist :content)
-		     splash-buffer-contents))
-	(before  (plist-get plist :before))
-	(after   (plist-get plist :after))
-	(keymap  (plist-get plist :keymap))
-	(extra   (plist-get plist :extra))
-	;; Get the custom recovery content, if available.
-	;; Otherwise, check for suppression here and in the
-	;; package customizeable variables before using the
-	;; customizeable text as the content.
-	(recovery-content
-	 (or (plist-get plist :recovery-content)
-	     (and (plist-get plist :show-recovery)
-		  splash-buffer-show-recover-session
-		  splash-buffer-recover-session-text))))
-    ;; FIXME: Extract the remaining arguments and pass them on to
-    ;; `setq' after the call to `extra' below.
-    ;; FIXME: Should argument types be validated beforehand to
-    ;; prevent partial filling of the buffer?
-    (with-current-buffer buff
-      ;; Update the contents of the splash buffer.
-      (let ((inhibit-read-only t))
-	(erase-buffer)
-	(when before (funcall before))
-	;; Add the recover-session message to the content, so
-	;; long as this option is enabled and auto-save files are
-	;; found.
-	(when (and recovery-content
-		   ;; Check for auto-save files.
-		   (file-directory-p
-		    (file-name-directory
-		     auto-save-list-file-prefix)))
-	  (add-to-list 'content recovery-content t))
-	;; Format the content and insert it into the buffer.
-	(dolist (text content)
-	  (apply #'fancy-splash-insert text)
-	  (insert "\n"))
-	(skip-chars-backward "\n")
-	(delete-region (point) (point-max))
-	(insert "\n")
-	(when after (funcall after)))
-      ;; Apply local settings.
-      (set-buffer-modified-p nil)
-      (when keymap (use-local-map keymap))
-      (when extra (funcall extra)))
-    ;; Finally, switch to the buffer.
-    (switch-to-buffer buff)))
+       (defun ,symbol ()
+	 ;; FIXME: Insert the docstring.
+	 (interactive)
+	 (unless (buffer-live-p (get-buffer ,buffer-name-symbol))
+	   (,create-func))
+	 (switch-to-buffer ,buffer-name-symbol)
+	 (redisplay))
+       )))
 
 (provide 'splash-buffer)
 
